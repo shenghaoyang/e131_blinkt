@@ -121,11 +121,11 @@ Default(release_program)
 
 # Install directives 
 files = {
-    '/usr/bin/e131_blinkt': ('Release/e131_blinkt', 0755),
-    '/etc/e131_blinkt/e131_blinkt.conf': ('e131_blinkt.conf', 0644),
-    '/usr/share/factory/etc/e131_blinkt/e131_blinkt.conf': 
+    'usr/bin/e131_blinkt': ('Release/e131_blinkt', 0755),
+    'etc/e131_blinkt/e131_blinkt.conf': ('e131_blinkt.conf', 0644),
+    'usr/share/factory/etc/e131_blinkt/e131_blinkt.conf': 
         ('e131_blinkt.conf', 0644), 
-    '/usr/lib/systemd/system/e131_blinkt@.service': 
+    'usr/lib/systemd/system/e131_blinkt@.service': 
         ('e131_blinkt@.service', 0644)
 }
 
