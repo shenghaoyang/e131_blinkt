@@ -1,6 +1,6 @@
 # Maintainer: Shenghao Yang <me@shenghaoyang.info>
 pkgname=e131_blinkt-git
-pkgver=0.0.1.r0.g6c1d8c4
+pkgver=0.0.1.r1.g30d7166
 pkgrel=1
 pkgdesc="E1.31 to Blinkt! gateway"
 arch=('x86_64' 'arm' 'armv6h' 'armv7h' 'aarch64')
@@ -25,5 +25,5 @@ build() {
 
 package() {
     cd "$srcdir/${pkgname%-git}"
-    scons --destdir="$pkgdir/" install
+    scons DESTDIR="$pkgdir/" install
 }

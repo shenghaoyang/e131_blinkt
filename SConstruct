@@ -13,18 +13,14 @@ Type:
     'scons install' to install e131_blinkt.
     'scons -c install' to uninstall e131_blinkt.
 
-Arguments:
+Command line build variables:
     'scons install':
-        [--destdir=DIRECTORY]  root directory to install files under 
-                               [default: /]
+        [DESTDIR=DIRECTORY]  root directory to install files under 
+                             [default: /]
     
 By default, the release target is built.
 """
 )
-AddOption('--destdir', dest='destdir', type='string', nargs='1',
-          action='store', metavar='DIR', help='installation root',
-          default='/')
-destdir = GetOption('destdir')
 
 # Library dependencies and headers
 libs = {
@@ -125,13 +121,15 @@ Default(release_program)
 
 # Install directives 
 files = {
-    '/usr/bin/e131_blinkt': ('Release/e131_blinkt', 0755),
+    '/usr/bin/e131_blinkt': ('Release/e131_blinkt', 0755z),
     '/etc/e131_blinkt/e131_blinkt.conf': ('e131_blinkt.conf', 0644),
     '/usr/share/factory/etc/e131_blinkt/e131_blinkt.conf': 
         ('e131_blinkt.conf', 0644), 
     '/usr/lib/systemd/system/e131_blinkt@.service': 
         ('e131_blinkt@.service', 0644)
 }
+
+destdir = ARGUMENTS.setdefault('DESTDIR', '/')
 
 install_nodes = []
 for target, (source, mode) in files.items():
