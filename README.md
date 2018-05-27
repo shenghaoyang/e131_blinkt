@@ -75,8 +75,8 @@ scons -c install
 
 - There is a ``systemd`` service file included. Enable and start
   ``e131_blinkt`` through:
-  ``# systemctl enable --now e131_blinkt@/dev/gpiochip0.service``.
-  Replace ``/dev/gpiochip0`` with your desired GPIO character 
+  ``# systemctl enable --now e131_blinkt@gpiochip0.service``.
+  Replace ``gpiochip0`` with your desired GPIO character 
   device.
   
 # License
