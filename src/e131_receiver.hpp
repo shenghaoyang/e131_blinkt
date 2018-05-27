@@ -12,21 +12,29 @@
 #include <deleters.hpp>
 #include <e131.h>
 #include <systemd/sd-event.h>
+#include <systemd/sd-journal.h>
 #include <endian.h>
-#include <map>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <functional>
 #include <stdexcept>
-#include <array>
+#include <iostream>
 #include <iterator>
-#include <queue>
-#include <cassert>
 #include <string>
 #include <cstdint>
 #include <memory>
+#include <queue>
+#include <array>
+#include <map>
 
+/**
+ * Functionality crucial to the E1.31 receiver implementation in e131_blinkt.
+ */
 namespace e131_receiver {
 /**
- * Type used to represent the 128 bit UUID of the source.
- * Stored big endian.
+ * Type used to represent the 128 bit UUID of the source. Big Endian.
  */
 using cid = std::basic_string<std::uint8_t>;
 
@@ -41,10 +49,56 @@ constexpr std::uint32_t network_data_loss_timeout { 2500 };
 constexpr std::uint32_t e131_data_vector { 0x00000004 };
 
 /**
- * Used to represent the current priority level for a E1.31 universe
- * (not official E1.31 terminology). The priority level here refers to the
- * minimum priority E1.31 sources must be transmitting at before their data
- * can be output.
+ * Obtain the string representation of a source UUID
+ *
+ * \param uuid UUID
+ * \return string representation of the source UUID, in the form \code 0x<val>,
+ * where \code <val> contains the zero-padded hexadecimal representation of
+ * the UUID, starting with the most-significant byte.
+ */
+std::string cid_str(const cid& uuid);
+
+/**
+ * Simple class akin to \ref std::unique_ptr, but for file descriptors, and with
+ * reduced functionality.
+ */
+class unique_fd {
+private:
+    int fd { -1 };
+public:
+    /**
+     * Default constructor. Initializes internal fd storage to \code -1.
+     */
+    explicit unique_fd();
+    /**
+     * Constructs object from an existing file descriptor.
+     *
+     * Ownership of the file descriptor is transferred to this object.
+     *
+     * \param f file descriptor to use.
+     */
+    explicit unique_fd(int f);
+    unique_fd(const unique_fd& other) = delete;
+    unique_fd(const unique_fd&& other) = delete;
+    unique_fd& operator=(const unique_fd& other) = delete;
+    unique_fd& operator=(const unique_fd&& other) = delete;
+
+    /**
+     * Conversion to integer.
+     *
+     * Can be used to obtain the file descriptor stored in the object.
+     */
+    operator int();
+
+    /**
+     * Closes the file descriptor.
+     */
+    ~unique_fd();
+};
+
+/**
+ * Used to track the priority of the highest priority source in an E1.31
+ * universe.
  */
 class priority {
 public:
@@ -57,49 +111,54 @@ public:
      */
     using count_type = int;
     /**
-     * Default E1.31 priority
+     * Minimum E1.31 priority
      */
-    static constexpr uint8_t default_priority { 100 };
+    static constexpr uint8_t minimum_priority { 0 };
 
 private:
     std::map<priority_type, count_type> prio_cnt { };
 
 public:
+    /**
+     * Sets priority to the default E1.31 priority and source count to zero.
+     */
+    priority();
     /* Allow default move constructor */
     /* Allow default copy constructor */
     /* Allow default copy-assign */
     /* Allow default move-assign */
 
     /**
-     * Default constructor.
+     * Type-conversion to type representing current E1.31 priority.
      *
-     * Sets priority to the default E1.31 priority and source count to zero.
+     * Allows users to obtain tracked priority level by using this object
+     * in a context where a numeric type is required.
      */
-    priority() {
-        prio_cnt[default_priority] = 1;
-    }
+    operator priority_type() const;
 
-    operator priority_type() const {
-        return prio_cnt.rbegin()->first;
-    }
+    /**
+     * Add a new source priority.
+     *
+     * \param p priority of the source.
+     * \return new priority level
+     */
+    priority_type add(priority_type p);
 
-    priority_type add(priority_type p) {
-        ++prio_cnt[p];
-        return *this;
-    }
+    /**
+     * Remove a source priority.
+     *
+     * \param p priority of the source.
+     * \return new priority level.
+     */
+    priority_type remove(priority_type p);
 
-    priority_type remove(priority_type p) {
-        --prio_cnt[p];
-        if (prio_cnt[p] <= 0)
-            prio_cnt.erase(p);
-        return *this;
-    }
-
-    count_type sources() const {
-        return (*this == default_priority)
-            ? prio_cnt.rbegin()->second - 1
-            : prio_cnt.rbegin()->second;
-    }
+    /**
+     * Obtain the number of sources with priority equivalent to the
+     * current priority.
+     *
+     * \return source count.
+     */
+    count_type sources() const;
 };
 
 /**
@@ -107,329 +166,220 @@ public:
  * E1.31 DMX data.
  */
 struct source {
-    cid uuid;                              ///< Source CID
+    const cid uuid;                        ///< Source CID
     priority::priority_type prio;          ///< Priority at which the source broadcasts
     std::uint8_t sequence_data;            ///< Sequence of the last E1.31 data packet
     std::uint8_t sequence_synchronization; ///< Sequence of the last E1.31 sync packet
+    std::unique_ptr<sd_event_source, deleters::sd_event_source> timer_evs;  ///< Data loss timer event source
 };
 
 /**
- * Structure representing information regarding a particular E1.31 universe
+ * Event structure returned in vector provided by \ref universe::update()
  */
-template<typename timer>
+struct update_event {
+    /**
+     * Event type
+     */
+    enum event_type {
+        CHANNEL_DATA_UPDATED, ///< DMX channel data updated
+        SOURCE_ADDED,         ///< New source added
+        SOURCE_REMOVED,       ///< Source removed
+        SOURCE_LIMIT_REACHED, ///< Source limit reached, source not added
+    } const event;
+    /**
+     * UUID of source involved in the event.
+     */
+    const cid id;
+
+    update_event(event_type t, const cid& uuid)
+    : event { t }, id { uuid } {
+    }
+};
+
+struct channel_data_updated_event : public update_event {
+    channel_data_updated_event(const cid& uuid);
+};
+
+struct source_added_event : public update_event {
+    source_added_event(const cid& uuid);
+};
+
+struct source_removed_event : public update_event {
+    source_removed_event(const cid& uuid);
+};
+
+struct source_limit_reached_event : public update_event {
+    source_limit_reached_event(const cid& uuid);
+};
+
+/**
+ * Object representing a particular E1.31 universe.
+ *
+ * Used to track sources and their priorities to decide from which source to
+ * update DMX channel data from.
+ */
 class universe {
 public:
-    using channel_value_type = std::uint8_t;
-    using sources = std::map<cid, source>;
-
-    class update_event {
-    public:
-        enum event_type {
-            NONE,
-            SOURCE_ADDED,
-            SOURCE_REMOVED,
-            SOURCE_LIMIT_REACHED,
-            FATAL_ERROR,
-        } const event;
-        const cid id;
-    public:
-        update_event(event_type t, const cid& uuid)
-        : event { t }, id { uuid } {
-
-        }
-
-        virtual ~update_event() {
-
-        }
-    };
-
-    class no_event : public update_event {
-    public:
-        no_event()
-        : update_event { update_event::event_type::NONE, cid { } } {
-
-        }
-    };
-
-    class source_added_event : public update_event {
-    public:
-        source_added_event(const cid& uuid)
-        : update_event { update_event::event_type::SOURCE_ADDED, uuid } {
-
-        }
-    };
-
-    class source_removed_event : public update_event {
-    public:
-        source_removed_event(const cid& uuid)
-        : update_event { update_event::event_type::SOURCE_REMOVED, uuid } {
-
-        }
-    };
-
-    class source_limit_reached_event : public update_event {
-    public:
-        source_limit_reached_event(const cid& uuid)
-        : update_event { update_event::event_type::SOURCE_LIMIT_REACHED, uuid }
-        {
-
-        }
-    };
-
-    class fatal_error_event : public update_event {
-    private:
-        const std::string reason;
-    public:
-        fatal_error_event(const cid& uuid, const std::string& what)
-        : update_event { update_event::event_type::FATAL_ERROR, uuid },
-          reason { what } {
-
-        }
-
-        const std::string& what() const {
-            return reason;
-        }
-    };
-    using update_return = std::unique_ptr<update_event>;
+    using channel_data_type = std::array<std::uint8_t, 512>;
 private:
-    priority prio { };
-    sources srcs { };
-    std::array<channel_value_type, 512> channel_data { };
-    std::queue<cid> pending_removal { };
-    timer tmrs;
-    priority::count_type max_sources;
-    bool ignore_preview_flag;
-    int uni;
+    priority prio { };                                        ///< Universe priority
+    std::map<const cid, source> srcs { };                     ///< CID to source mapping
+    std::map<sd_event_source* const,
+        std::reference_wrapper<const cid>> evs_cid { };       ///< Event source to cid map
+    channel_data_type channel_data { };                       ///< DMX channel data
+    std::queue<cid> pending_removal { };                      ///< Sources pending removal
+    std::vector<update_event> queued_events { };              ///< Events pending return
+    priority::count_type max_sources;                         ///< Maximum source count
+    bool ignore_preview_flag;                                 ///< Preview flag ignore
+    int uni;                                                  ///< Watched universe number
+    unique_fd e131_socket;                                    ///< E1.31 socket fd
+    std::unique_ptr<sd_event, deleters::sd_event> ev;         ///< Systemd event loop
 
-    enum class add_source_return {
-        ADD_SUCCESS,
-        ADD_FAILURE_SOURCE_LIMIT,
-        ADD_FAILURE_TIMER,
-    };
+    /**
+     * Add and track a particular source sending E1.31 data for the watched
+     * universe.
+     *
+     * \param uuid UUID of the source to be added.
+     * \param pkt initial E1.31 data packet from the source.
+     * \throw source_limit_reached_event on reaching maximum source count.
+     * \throw std::system_error on system-related errors on adding source.
+     */
+    void add_source(const cid& uuid, const e131_packet_t& pkt);
 
-    add_source_return add_source(const e131_packet_t& pkt) {
-        if (srcs.size() == max_sources) {
-            return add_source_return::ADD_FAILURE_SOURCE_LIMIT;
-        }
-        else {
-            source src {
-                cid { pkt.root.cid, pkt.root.cid + sizeof(pkt.root.cid) },
-                pkt.frame.priority,
-                pkt.frame.seq_number,
-                0,
-            };
-            if (!tmrs.add(src.uuid, network_data_loss_timeout))
-                return add_source_return::ADD_FAILURE_TIMER;
-            prio.add(src.prio);
-            srcs[src.uuid] = src;
-            return add_source_return::ADD_SUCCESS;
-        }
-    }
+    /**
+     * Reset the network data loss timer for a particular source.
+     *
+     * \param src source object.
+     * \throw std::system_error on system-related errors on resetting timer.
+     */
+    void source_timer_reset(const source& src);
 
-    bool remove_source(const cid& id) {
-        if (!tmrs.remove(id))
-            return false;
-        prio.remove(srcs[id].prio);
-        srcs.erase(id);
-        return true;
-    }
+    /**
+     * Untrack a particular source.
+     *
+     * The removal event will be pushed into \ref queued_events.
+     *
+     * \param src source object.
+     */
+    void remove_source(const source& src);
+
+    /**
+     * Checks if an E1.31 packet is valid, and should be processed further.
+     *
+     * An E1.31 packet is only considered valid if:
+     * - The packet's data fields are within the limits set in the E1.31
+     *   specification.
+     * - The root layer protocol header in the packet contains a vector
+     *   identifying it as an E1.31 DATA packet.
+     * - The packet's E1.31 header identifies the packet as containing
+     *   E1.31 data pertaining to the universe this object is tracking,
+     * - The packet's preview flag is not set OR the ignore preview flag
+     *   setting is set.
+     *
+     * \param pkt packet to inspect.
+     * \retval true packet should be processed further.
+     * \retval false packet processing should terminate.
+     */
+    bool valid_packet(e131_packet_t& pkt);
+
+    /**
+     * Callback to be called by the event loop on timer expiring.
+     *
+     * \see sd_event_add_time for more information regarding
+     *      function arguments.
+     * \retval 0 timer callback execution success.
+     * \retval nonzero timer callback execution failure.
+     */
+    static int timer_callback(sd_event_source* const s, std::uint64_t usec,
+        void* userdata);
+
+    /**
+     * Handle updates from the E1.31 socket.
+     *
+     * \param revents events bitmask from the I/O event callback.
+     * \retval true successfully processed updates
+     * \retval false unsuccessfully processed updates.
+     */
+    bool socket_handler(std::uint32_t revents);
+
+    /**
+     * Callback to be called by the event loop when data has been received
+     * on the E1.31 socket.
+     *
+     * \see sd_event_add_io for more information regarding
+     *      function arguments.
+     * \retval 0 callback execution success.
+     * \retval nonzero callback execution failure.
+     */
+    static int socket_callback(sd_event_source* s, int fd,
+        std::uint32_t revents, void* userdata);
 public:
-    universe(priority::count_type sources, typename timer::key_type k,
-        bool preview_flag_ignore, int universe_num)
-    : tmrs { k, this }, max_sources { sources },
-      ignore_preview_flag { preview_flag_ignore }, uni { universe_num } {
+    /**
+     * Initialize a universe object.
+     *
+     * \param sources maximum number of sources to register.
+     * \param preview_flag_ignore whether to ignore the preview flag in
+     *        E1.31 data packets.
+     * \param universe_num the universe number assigned to the universe this
+     *        object is tracking.
+     * \throws std::system_error on system failures.
+     */
+    universe(priority::count_type sources, bool preview_flag_ignore,
+        int universe_num);
+    universe(const universe& other) = delete;
+    universe(const universe&& other) = delete;
+    universe& operator=(const universe& other) = delete;
+    universe& operator=(const universe&& other) = delete;
 
-    }
-    /* Allow copy constructor */
-    /* Allow move constructor */
-    /* Allow copy-assign */
-    /* Allow move-assign */
-    update_return update(const e131_packet_t& pkt) {
-        if (!pending_removal.empty()) {
-            cid uuid { pending_removal.front() };
-            pending_removal.pop();
-            if (!remove_source(uuid))
-                return update_return {new fatal_error_event {
-                    uuid, "Unable to remove source" }
-                };
-            return update_return { new source_removed_event { uuid } };
-        }
-        if ((e131_pkt_validate(&pkt) != E131_ERR_NONE)
-            && (be32toh(pkt.root.vector) == e131_data_vector)
-            && (pkt.frame.universe == uni)
-            && ((!e131_get_option(&pkt, E131_OPT_PREVIEW)
-                || ignore_preview_flag)))
-            return update_return { new no_event { } };
+    /**
+     * Obtain a file descriptor that can be polled for \code POLLIN or
+     * \code EPOLLIN events, to signal when to call the \ref update()
+     * member function.
+     *
+     * \return non-negative file descriptor on success, negative errno-style
+     *         error code on failure.
+     */
+    int event_fd() const;
 
-        cid uuid { pkt.root.cid, pkt.root.cid + sizeof(pkt.root.cid) };
-        bool terminated { e131_get_option(&pkt, E131_OPT_TERMINATED) };
-        bool new_source { false };
+    /**
+     * Process data for the universe tracker.
+     *
+     * To be called when the file descriptor associated with \ref event_fd()
+     * can be read from.
+     *
+     * \param pkt E1.31 packet
+     * \return vector of \ref update_event objects.
+     * \throws std::runtime_error on failures when adding / removing / modifying
+     *         sources, due to errors not related to source count limiting.
+     * \throws std::system_error on system related failures.
+     * \note When any exception has occurred, the E1.31 receiver is considered
+     *       to be in a degraded state. No non-const operations may then be
+     *       performed on the receiver object.
+     */
+    const std::vector<update_event>& update();
 
-        if (srcs.find(uuid) != srcs.end()) {
-            source& src { srcs[uuid] };
+    /**
+     * Obtain the maximum source priority among all sources registered.
+     *
+     * \return maximum source priority.
+     */
+    priority::priority_type max_priority() const;
 
-            if (e131_pkt_discard(&pkt, src.sequence_data))
-                return update_return { new no_event { } };
-        } else {
-            if (terminated)
-                return update_return {new no_event { } };
+    /**
+     * Obtain the number of sources sending data at the maximum priority.
+     *
+     * \return number of sources sending data at the maximum priority.
+     */
+    priority::count_type max_priority_sources() const;
 
-            switch (add_source(pkt)) {
-                case add_source_return::ADD_FAILURE_SOURCE_LIMIT:
-                    return update_return { new source_limit_reached_event {
-                        uuid } };
-                case add_source_return::ADD_FAILURE_TIMER:
-                    return update_return { new fatal_error_event {
-                        uuid, "Failed to add timer" } };
-                default:
-                    new_source = true;
-            }
-        }
-
-        // src references a valid source
-        source& src { srcs[uuid] };
-        if (terminated) {
-            if (!tmrs.modify(uuid, 0))
-                return update_return { new fatal_error_event {
-                    uuid, "Timer modification failure" } };
-            return update_return { new no_event { } };
-        } else {
-            if (!tmrs.modify(uuid, network_data_loss_timeout))
-                return update_return { new fatal_error_event {
-                    uuid, "Timer modification failure" } };
-        }
-
-        if ((pkt.frame.priority >= prio)
-            && pkt.dmp.prop_val_cnt
-            && (pkt.dmp.prop_val[0] == 0x00))
-            std::copy(pkt.dmp.prop_val + 1, pkt.dmp.prop_val
-                + be16toh(pkt.dmp.prop_val_cnt), channel_data.data());
-
-        src.sequence_data = pkt.frame.seq_number;
-
-        if (new_source)
-            return update_return { new source_added_event { uuid } };
-        else
-            return update_return { new no_event { } };
-    }
-
-    void timer_expired(const cid& uuid) {
-        pending_removal.push(uuid);
-    }
-
-    priority::priority_type max_priority() const {
-        return prio;
-    }
-
-    priority::count_type max_priority_sources() const {
-        return prio.sources();
-    }
-
-    const std::array<uint8_t, 512>& dmx_data() const {
-        return channel_data;
-    }
-
-    ~universe() {
-        for (auto begin = srcs.begin(); begin != srcs.end(); ) {
-            auto next { std::next(begin) };
-            remove_source(begin->first);
-            begin = next;
-        }
-    }
+    /**
+     * Obtain the DMX channel data, updated from the most recent
+     * call to \ref update() with a \ref channel_data_update_event returned.
+     *
+     * \return DMX channel data represented as an array of 512 bytes.
+     */
+    const channel_data_type& dmx_data() const;
 };
-
-int systemd_event_timer_callback(sd_event_source* const s,
-    std::uint64_t usec, void* userdata);
-/**
- * Timer class - creates timers and runs callbacks
- */
-class systemd_event_timer {
-public:
-    using key_type = sd_event*;
-    using universe_type = universe<systemd_event_timer>;
-private:
-    universe_type& uni;
-    std::unique_ptr<sd_event, deleters::sd_event> evloop;
-    std::map<cid, std::unique_ptr<sd_event_source, deleters::sd_event_source>>
-        timer_sources { };
-    std::map<sd_event_source*, cid> sources_cid { };
-public:
-    systemd_event_timer(key_type key, universe_type* const u)
-    : uni { *u }, evloop { key } {
-        sd_event_ref(key);
-    }
-    systemd_event_timer(const systemd_event_timer& other) = delete;
-    /* No implicit move constructor or move-assignment operator definition */
-    systemd_event_timer& operator=(const systemd_event_timer& other) = delete;
-
-    bool add(const cid& uuid, int millis) {
-        assert(timer_sources.find(uuid) == timer_sources.end());
-
-        int r;
-        sd_event_source* src;
-
-        if ((r = sd_event_add_time(evloop.get(), &src, CLOCK_MONOTONIC,
-            static_cast<std::uint64_t>(millis)
-            * UINT64_C(1000), 0, systemd_event_timer_callback,
-            reinterpret_cast<void*>(this))) < 0) {
-            return false;
-        } else {
-            timer_sources.try_emplace(uuid, src, deleters::sd_event_source { });
-            sources_cid.try_emplace(src, uuid);
-        }
-
-        return true;
-    }
-
-    bool modify(const cid& uuid, int millis) {
-        auto it { timer_sources.find(uuid) };
-        assert(it != timer_sources.end());
-
-        std::uint64_t now;
-
-        if (sd_event_now(evloop.get(), CLOCK_MONOTONIC, &now) < 0)
-            return false;
-
-        if (sd_event_source_set_time(it->second.get(), now
-            + static_cast<std::uint64_t>(millis)
-            * UINT64_C(1000)) < 0)
-            return false;
-
-        return true;
-    }
-
-    bool remove(const cid& uuid) {
-        auto it { timer_sources.find(uuid) };
-        assert(it != timer_sources.end());
-
-        sources_cid.erase(timer_sources[uuid].get());
-        timer_sources.erase(uuid);
-
-        return true;
-    }
-
-    void expired(sd_event_source* const s) {
-        auto it { sources_cid.find(s) };
-        assert(it != sources_cid.end());
-
-        uni.timer_expired(it->second);
-    }
-
-    ~systemd_event_timer() {
-    }
-};
-
-/**
- * Timer class callback
- */
-int systemd_event_timer_callback(sd_event_source* const s,
-    std::uint64_t usec, void* userdata) {
-    auto& timer { *reinterpret_cast<systemd_event_timer*>(userdata) };
-
-    timer.expired(s);
-
-    return 0;
-}
 }
 
 #endif /* E131_RECEIVER_HPP_ */
