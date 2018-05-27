@@ -70,8 +70,9 @@ static int universe_handler(sd_event_source* s, int fd, uint32_t revents,
                     }
                     if (updated)
                         blinkt.commit();
-#endif
+#else
                     std::cerr << "DMX data updated" << std::endl;
+#endif
                 }
                     break;
                 case event_type::SOURCE_ADDED:

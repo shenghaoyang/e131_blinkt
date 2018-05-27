@@ -1,5 +1,5 @@
 [Unit]
-Description=Blinkt! E1.31 receiver on %f
+Description=Blinkt! E1.31 receiver on /dev/%i
 
 [Service]
 DynamicUser=True
@@ -9,7 +9,7 @@ ProtectHome=True
 ProtectKernelTunables=True
 ProtectKernelModules=True
 ProtectControlGroups=True
-DeviceAllow=%f rw
+DeviceAllow=/dev/%i rw
 DevicePolicy=closed
 MemoryDenyWriteExecute=True
 PrivateTmp=True
@@ -39,7 +39,7 @@ SystemCallFilter=~@swap
 SystemCallFilter=~@sync
 
 Type=notify
-ExecStart=/usr/bin/e131_blinkt --gpiodev=%f
+ExecStart=/usr/bin/e131_blinkt --gpiodev=/dev/%i
 
 [Install]
 WantedBy=multi-user.target
