@@ -10,12 +10,22 @@ Type:
     'scons release' to build the release version of the program.
     'scons debug'   to build the development version of the program.
     'scons all'     to build all targets.
-    'scons install' to install e131_blinkt. Installs under /usr by default.
+    'scons install' to install e131_blinkt.
     'scons -c install' to uninstall e131_blinkt.
+
+Arguments:
+    'scons install':
+        [--destdir=DIRECTORY]  root directory to install files under 
+                               [default: /]
     
 By default, the release target is built.
 """
 )
+AddOption('--destdir', dest='destdir', type='string', nargs='1',
+          action='store', metavar='DIR', help='installation root',
+          default='/')
+destdir = GetOption('destdir')
+
 # Library dependencies and headers
 libs = {
     'e131'    : ('C', ['e131.h']),
@@ -126,7 +136,7 @@ files = {
 install_nodes = []
 for target, (source, mode) in files.items():
     install_nodes.append(
-        release.Command(target, source, 
+        release.Command(os.path.join(destdir, target), source, 
                         [Copy('$TARGET', '$SOURCE'),
                          Chmod('$TARGET', mode)]))
 
