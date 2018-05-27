@@ -121,7 +121,7 @@ Default(release_program)
 
 # Install directives 
 files = {
-    '/usr/bin/e131_blinkt': ('Release/e131_blinkt', 0755z),
+    '/usr/bin/e131_blinkt': ('Release/e131_blinkt', 0755),
     '/etc/e131_blinkt/e131_blinkt.conf': ('e131_blinkt.conf', 0644),
     '/usr/share/factory/etc/e131_blinkt/e131_blinkt.conf': 
         ('e131_blinkt.conf', 0644), 
