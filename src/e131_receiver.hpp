@@ -224,8 +224,7 @@ public:
 private:
     priority prio { };                                        ///< Universe priority
     std::map<const cid, source> srcs { };                     ///< CID to source mapping
-    std::map<sd_event_source* const,
-        std::reference_wrapper<const cid>> evs_cid { };       ///< Event source to cid map
+    std::map<sd_event_source* const, cid> evs_cid { };        ///< Event source to cid map
     channel_data_type channel_data { };                       ///< DMX channel data
     std::queue<cid> pending_removal { };                      ///< Sources pending removal
     std::vector<update_event> queued_events { };              ///< Events pending return
