@@ -114,11 +114,11 @@ public:
         std::size_t leds, bool reset = false):
         fd { open(path.c_str(), O_RDWR) },
         num_leds { leds },
-        framebuffer { },
-        pixel_data_start { framebuffer.data() + start_sequence.size() } {
+        framebuffer { } {
 
         framebuffer.resize(end_bytes_required(leds) + start_sequence.size()
             + (sizeof(output) * leds), 0);
+        pixel_data_start = { framebuffer.data() + start_sequence.size() };
 
         std::uint32_t spi_mode { SPI_MODE_0 };
         std::uint8_t spi_lsbfirst { 0 };
@@ -179,9 +179,7 @@ public:
      */
     void fill(const output& v) {
         for (unsigned int i = 0; i < num_leds; i++) {;
-            std::copy(reinterpret_cast<const std::uint8_t* const>(&v),
-                reinterpret_cast<const std::uint8_t* const>(&v) + sizeof(v),
-                pixel_data_start + (i * sizeof(v)));
+            set(i, v);
         }
     }
 

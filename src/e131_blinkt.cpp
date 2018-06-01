@@ -63,7 +63,7 @@ static int universe_handler(sd_event_source* s, int fd, uint32_t revents,
                             channel_data[(i * 3) + 2])
                         };
                         if (target != blinkt[i]) {
-                            blinkt[i] = target;
+                            blinkt.set(i, target);
                             updated = true;
                         }
                     }
