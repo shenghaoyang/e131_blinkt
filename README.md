@@ -1,7 +1,7 @@
 # WARNING: EXPERIMENTAL
 
-- This is a _toy project_ to learn about systemd, the new gpio
-  character device, E1.31, C++, and scons.
+- This is a _toy project_ to learn about systemd, 
+  E1.31, C++, and scons.
 
 - The quality of this piece of software is embarrassingly sub-par.
 
@@ -26,7 +26,6 @@ Extended ``E1.31`` features are _not supported_.
 - Build & run time dependencies:
 
 ```
-libgpiod
 libconfig
 libe131
 systemd
@@ -75,9 +74,8 @@ scons -c install
 
 - There is a ``systemd`` service file included. Enable and start
   ``e131_blinkt`` through:
-  ``# systemctl enable --now e131_blinkt@gpiochip0.service``.
-  Replace ``gpiochip0`` with your desired GPIO character 
-  device.
+  ``# systemctl enable --now e131_blinkt@spidev0.0.service``.
+  Replace ``spidev0.0`` with your desired userspace SPI device.
   
 # License
 

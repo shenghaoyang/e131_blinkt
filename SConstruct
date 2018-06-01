@@ -29,7 +29,6 @@ libs = {
                       'systemd/sd-daemon.h']),
     'config++': ('C++', ['libconfig.h++']),
     'docopt'  : ('C++', ['docopt/docopt.h']),
-    'gpiodcxx': ('C++', ['gpiod.hpp'])
 }
 
 # Header dependencies
@@ -38,7 +37,10 @@ headers_c = (
     'endian.h',
     'sys/stat.h',
     'sys/types.h',
-    'fcntl.h'
+    'sys/ioctl.h',
+    'fcntl.h',
+    'linux/types.h',
+    'linux/spi/spidev.h',
 )
 
 headers_cxx = (
@@ -57,7 +59,10 @@ headers_cxx = (
     'cstdint',
     'memory',
     'limits',
-    'functional'
+    'functional',
+    'type_traits',
+    'cstring',
+    'vector'
 )
 
 
@@ -100,7 +105,6 @@ common_env.Append(CXXFLAGS='-std=c++17')
 common_env.ParseConfig('pkg-config --cflags --libs libsystemd')
 common_env.ParseConfig('pkg-config --cflags --libs libconfig++')
 common_env.ParseConfig('pkg-config --cflags --libs docopt')
-common_env.ParseConfig('pkg-config --cflags --libs libgpiodcxx')
 
 debug = common_env.Clone()
 release = common_env.Clone()

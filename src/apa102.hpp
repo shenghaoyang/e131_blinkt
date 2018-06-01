@@ -1,6 +1,8 @@
 /**
  * \file apa102.hpp
  *
+ * Simple APA102 driver using Linux userspace SPI support.
+ *
  * \copyright Shenghao Yang, 2018
  * 
  * See LICENSE for details
@@ -9,9 +11,15 @@
 #ifndef APA102_HPP_
 #define APA102_HPP_
 
-#include <gpiod.hpp>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/types.h>
+#include <linux/spi/spidev.h>
 #include <system_error>
+#include <type_traits>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 #include <array>
 
@@ -43,238 +51,137 @@ constexpr unsigned int end_bytes_required(unsigned int leds) {
  * APA102 LEDs to change their output.
  */
 struct output {
-private:
     ::std::uint8_t hdr : 3;         ///< Header for LED output sequence
-public:
     ::std::uint8_t brt : 5;         ///< LED brightness
     ::std::uint8_t blue;            ///< LED blue channel
     ::std::uint8_t green;           ///< LED green channel
     ::std::uint8_t red;             ///< LED red channel
-
-    output(uint8_t brightness, uint8_t r, uint8_t g, uint8_t b):
-        hdr {0b111}, brt {brightness}, blue {b}, green {g},
-        red {r} {
-    }
-
-    bool operator==(const output& other) {
-        return (brt == other.brt) && (blue == other.blue)
-            && (green == other.green) && (red == other.red);
-    }
-
-    bool operator!=(const output& other) {
-        return !(*this == other);
-    }
-
 } __attribute__((packed));
+
+constexpr bool operator==(const output& lhs, const output& rhs) {
+    return (lhs.brt == rhs.brt) && (lhs.blue == rhs.blue)
+        && (lhs.green == rhs.green) && (lhs.red == rhs.red);
+}
+
+constexpr bool operator!=(const output& lhs, const output& rhs) {
+    return !(lhs == rhs);
+}
 
 static_assert(sizeof(output) == 0x04, "Size of output structure "
         "is not 4 bytes - packing failure.");
+
+static_assert(std::is_standard_layout<output>::value == true,
+    "Output structure does not have a standard layout - cannot"
+    "perform raw memory operations on output structure");
+
+/**
+ * Creates an output structure from brightness and RGB components.
+ *
+ * \param brt LED global luminance setting, in range [0, 0x1f]
+ * \param red LED luminance level for the red channel, in range [0, 0xff]
+ * \param green LED luminance level for the green channel, in range [0, 0xff]
+ * \param blue LED luminance level for the blue channel, in range [0, 0xff]
+ * \return output structure filled with data provided as arguments.
+ */
+constexpr output make_output(std::uint8_t brt, std::uint8_t red,
+    std::uint8_t green, std::uint8_t blue) {
+    return output { 0b111, brt, blue, green, red };
+}
+
 /**
  * Class used to control APA102 LEDs connected to device I/O lines.
- *
- * Emulates the container functionality of \ref std::array, with each element
- * of the array containing one \ref output element.
  */
 class apa102 {
 private:
-    using framebuffer_type = std::vector<output>;
+    using framebuffer_type = std::vector<std::uint8_t>;
 
-    gpiod::line_bulk lines;
+    int fd;
+    std::size_t num_leds;
     framebuffer_type framebuffer;
-    std::vector<int> line_states;
-
-    unsigned int end_bytes;
-    /**
-     * Write a particular byte to the LEDs
-     * \param b byte to write to the LEDs
-     * \throws std::system_error on failure in process of setting GPIO lines.
-     */
-    void write_byte(const uint8_t b) {
-        for (int i = 7; i > -1; i--) {
-            uint8_t bit = ((b >> i) & 0x01);
-            line_states[0] = 0;
-            line_states[1] = bit;
-            lines.set_values(line_states);
-            line_states[0] = 1;
-            lines.set_values(line_states);
-        }
-    }
-
-    /**
-     * Write the start sequence to the LEDs
-     *
-     * \throws std::system_error on failure in process of setting GPIO lines.
-     */
-    void write_start() {
-        for (uint8_t b : start_sequence) {
-            write_byte(b);
-        }
-    }
-
-    /**
-     * Write the LED output setting sequence to the LEDs
-     *
-     * \throws std::system_error on failure in process of setting GPIO lines.
-     */
-    void write_output() {
-        auto start = reinterpret_cast<const std::uint8_t*>(
-                framebuffer.data());
-        auto end = reinterpret_cast<const std::uint8_t* const>(
-                framebuffer.data() + framebuffer.size());
-        while (start != end) {
-            write_byte(*start);
-            ++start;
-        }
-    }
-
-    /**
-     * Write the LED update end sequence to the LEDs
-     *
-     * \throws std::system_error on failure in process of setting GPIO lines.
-     */
-    void write_end() {
-        for (unsigned int i = 0; i < end_bytes; i++) {
-            write_byte(0x00);
-        }
-    }
+    std::uint8_t* const pixel_data_start;
+    spi_ioc_transfer xfer { };
 public:
     /**
      * Construct a new object representing a string of APA102 LEDs.
      *
-     * \param chip_path path to gpiochip device representing a gpio controller
-     * or device whose gpio lines are attached to the clock and data lines of
-     * the APA102 LEDs.
-     * \param leds number of LEDs in the string.
-     * \param clk LED clock line offset
-     * \param data LED data line offset
+     * \param path path to userspace SPI device.
      * \param period clock waveform period, in nanoseconds
      * \param reset whether to reset all LEDs to blank output
-     * \throws ::std::system_error on failure in process of
-     * acquiring gpio line control, or on failure to reset LEDs.
+     * \throws std::system_error on failure in process of acquiring control of
+     * SPI device, or failure in resetting LEDs to blank.
      */
-    apa102(const std::string& chip_path, unsigned int leds,
-           uint8_t clk, uint8_t data, bool reset = false):
-        lines { },
-        framebuffer { leds, output { 0, 0, 0, 0 } },
-        line_states { 0x00, 0x00 }, end_bytes { end_bytes_required(leds) } {
-        auto chip { gpiod::chip(chip_path, gpiod::chip::OPEN_BY_PATH) };
-        ::std::vector<unsigned int> offsets { clk, data };
-        lines = chip.get_lines(offsets);
+    apa102(const std::string& path, std::uint32_t period,
+        std::size_t leds, bool reset = false):
+        fd { open(path.c_str(), O_RDWR) },
+        num_leds { leds },
+        framebuffer { },
+        pixel_data_start { framebuffer.data() + start_sequence.size() } {
 
-        auto req = gpiod::line_request {
-            "APA102",
-            gpiod::line_request::DIRECTION_OUTPUT,
-            std::bitset<32> { }
-        };
-        lines.request(req, ::std::vector<int> {0, 0});
-        if (reset) {
+        framebuffer.resize(end_bytes_required(leds) + start_sequence.size()
+            + (sizeof(output) * leds), 0);
+
+        std::uint32_t spi_mode { SPI_MODE_0 };
+        std::uint8_t spi_lsbfirst { 0 };
+        if ((fd == -1) || (ioctl(fd, SPI_IOC_WR_MODE32, &spi_mode) == -1)
+            || (ioctl(fd, SPI_IOC_WR_LSB_FIRST, &spi_lsbfirst) == -1))
+            throw std::system_error { errno, std::system_category() };
+
+        fill(make_output(0, 0, 0, 0));
+
+        std::memset(reinterpret_cast<void*>(&xfer), 0, sizeof(xfer));
+        xfer.tx_buf = reinterpret_cast<__u64>(framebuffer.data());
+        xfer.rx_buf = reinterpret_cast<__u64>(nullptr);
+        xfer.len = framebuffer.size();
+        xfer.speed_hz = (UINT32_C(1000000000) / period);
+        xfer.delay_usecs = 0;
+        xfer.bits_per_word = 8;
+        xfer.cs_change = 0;
+
+        if (reset)
             commit();
-        }
     }
-    /*
-     * Delete copy constructor and copy assignment operator - each object
-     * models a physical LED string, and we can't have two objects referring
-     * to the same string - it just doesn't make sense.
-     */
+
     apa102(const output& other) = delete;
+    apa102(const output&& other) = delete;
     apa102& operator=(const output& other) = delete;
-    /*
-     * Move constructor and move assignment operator not implicitly
-     * defined because copy constructor is user-defined.
-     */
+    apa102& operator=(const output&& other) = delete;
 
     /**
-     * Access the output setting of a particular LED.
+     * Get the output setting of a particular LED.
      *
      * \param led index of the LED to access. Must be within
      * the range \c 0 to the number of LEDs in the string - 1
      * \return output structure representing the output setting of that
      * particular LED.
      */
-    output& operator[](::std::size_t led) {
-        return framebuffer[led];
+    output operator[](std::size_t led) const {
+        auto temp = make_output(0, 0, 0, 0);
+        std::copy(pixel_data_start + (led * sizeof(temp)),
+            pixel_data_start + ((led + 1) * sizeof(temp)),
+            reinterpret_cast<std::uint8_t* const>(&temp));
+        return temp;
     }
 
     /**
-     * Access the output setting of a particular LED.
+     * Set the output setting of a particular LED.
      *
-     * Same as the other \code operator[] overload for this object,
-     * but returns a constant reference instead.
+     * \param led index of the LED to set the output setting for.
+     * \param v desired output setting.
      */
-    const output& operator[](::std::size_t led) const {
-        return framebuffer[led];
-    }
-
-
-    /**
-     * See \ref ::std::array::begin()
-     */
-    auto begin() {
-        return framebuffer.begin();
-    }
-
-    /**
-     * See \ref ::std::array::cbegin()
-     */
-    auto cbegin() const {
-        return framebuffer.cbegin();
-    }
-
-    /**
-     * See \ref ::std::array::end()
-     */
-    auto end() {
-        return framebuffer.end();
-    }
-
-    /**
-     * See \ref ::std::array::cend()
-     */
-    auto cend() const {
-        return framebuffer.cend();
-    }
-
-    /**
-     * See \ref ::std::array::rbegin()
-     */
-    auto rbegin() {
-        return framebuffer.rbegin();
-    }
-
-    /**
-     * See \ref ::std::array::crbegin()
-     */
-    auto crbegin() const {
-        return framebuffer.crbegin();
-    }
-
-    /**
-     * See \ref ::std::array::rend()
-     */
-    auto rend() {
-        return framebuffer.rend();
-    }
-
-    /**
-     * See \ref ::std::array::crend()
-     */
-    auto crend() const {
-        return framebuffer.crend();
-    }
-
-    /**
-     * See \ref ::std::array::size()
-     */
-    auto size() const {
-        return framebuffer.size();
+    void set(std::size_t led, const output& v) {
+        std::copy(reinterpret_cast<const std::uint8_t* const>(&v),
+            reinterpret_cast<const std::uint8_t* const>(&v) + sizeof(v),
+            pixel_data_start + (led * sizeof(v)));
     }
 
     /**
      * See \ref ::std::array::fill()
      */
     void fill(const output& v) {
-        for (auto& o: *this) {
-            o = v;
+        for (unsigned int i = 0; i < num_leds; i++) {;
+            std::copy(reinterpret_cast<const std::uint8_t* const>(&v),
+                reinterpret_cast<const std::uint8_t* const>(&v) + sizeof(v),
+                pixel_data_start + (i * sizeof(v)));
         }
     }
 
@@ -284,18 +191,27 @@ public:
      * \throws ::std::system_error on error while writing to the LEDs
      */
     void commit() {
-        write_start();
-        write_output();
-        write_end();
+        if (ioctl(fd, SPI_IOC_MESSAGE(1), &xfer) == -1)
+            throw std::system_error { errno, std::system_category() };
+    }
+
+    /**
+     * Obtain the number of LEDs controlled by this object.
+     *
+     * \return LED count.
+     */
+    std::size_t size() const {
+        return num_leds;
     }
 
     /**
      * Destructor for the apa102 object.
      *
-     * Relases the I/O lines reserved for the APA102 LEDs.
+     * Closes the file descriptor used to access the userspace SPI device.
      */
     ~apa102() {
-        lines.release();
+        if (fd != -1)
+            close(fd);
     }
 };
 }

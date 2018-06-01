@@ -11,12 +11,12 @@ static const char* cmd_help {
     R"(e131_blinkt - command a Pimoroni Blinkt! through E1.31
 
 Usage:
-    e131_blinkt [--help] [--verbose] [--gpiodev=FILE] [--config=FILE]
+    e131_blinkt [--help] [--verbose] [--spidev=FILE] [--config=FILE]
     
 Options:
-    --help          display this help messagel
+    --help          display this help message
     --verbose       enable verbose output for debugging
-    --gpiodev=FILE  path to gpio character device [default: /dev/gpiochip0]
+    --spidev=FILE   path to SPI device to use [default: /dev/spidev0.0]
     --config=FILE   config file  [default: /etc/e131_blinkt/e131_blinkt.conf]
 )" };
 
@@ -57,11 +57,10 @@ static int universe_handler(sd_event_source* s, int fd, uint32_t revents,
                     const auto& channel_data { uni.dmx_data() };
                     for (int i = info.channel_offset;
                          i < blinkt.size(); i++) {
-                        apa102::output target {
-                            0x1f,
+                        const auto& target { apa102::make_output(0x1f,
                             channel_data[i * 3],
                             channel_data[(i * 3) + 1],
-                            channel_data[(i * 3) + 2]
+                            channel_data[(i * 3) + 2])
                         };
                         if (target != blinkt[i]) {
                             blinkt[i] = target;
@@ -118,7 +117,7 @@ int main(int argc, char** argv) {
         config_settings user_settings { };
         config.readFile(arguments["--config"].asString().c_str());
         user_settings = config_settings { config,
-            arguments["--gpiodev"].asString() };
+            arguments["--spidev"].asString() };
         if (arguments["--verbose"].asBool())
             std::cout << user_settings;
 
@@ -167,9 +166,7 @@ int main(int argc, char** argv) {
             user_settings.e131.ignore_preview_flag, user_settings.e131.universe
         };
 #ifndef DEBUG
-        apa102::apa102 blinkt { user_settings.blinkt.path, 8,
-            static_cast<std::uint8_t>(user_settings.blinkt.clock),
-            static_cast<std::uint8_t>(user_settings.blinkt.data), true };
+        apa102::apa102 blinkt { user_settings.blinkt.path, 100, 8, true };
         handler_info info { uni, blinkt, user_settings.e131.offset };
 #else
         handler_info info { uni };

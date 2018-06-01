@@ -11,22 +11,16 @@ namespace e131_blinkt {
 
 config_settings::config_settings(const libconfig::Config& conf,
     const std::string& path)
-    : blinkt {
-        path,
-        conf.lookup("e131_blinkt.blinkt.clock"), conf.lookup(
-            "e131_blinkt.blinkt.data") }, e131 { conf.lookup(
-        "e131_blinkt.e131.universe"), conf.lookup(
-        "e131_blinkt.e131.max_sources"), conf.lookup(
-        "e131_blinkt.e131.offset"), conf.lookup(
-        "e131_blinkt.e131.ignore_preview_flag") } {
+    : blinkt { path }, e131 { conf.lookup("e131_blinkt.e131.universe"),
+        conf.lookup("e131_blinkt.e131.max_sources"),
+        conf.lookup("e131_blinkt.e131.offset"),
+        conf.lookup("e131_blinkt.e131.ignore_preview_flag") } {
 }
 
 std::ostream& operator<<(std::ostream& ost, const config_settings& settings) {
     ost << "Configuration settings:" << std::endl;
     ost << "Blinkt settings:" << std::endl;
-    ost << "\tgpiochip: " << settings.blinkt.path << std::endl;
-    ost << "\tclock line: " << settings.blinkt.clock << std::endl;
-    ost << "\tdata line: " << settings.blinkt.data << std::endl;
+    ost << "\tSPI device: " << settings.blinkt.path << std::endl;
 
     ost << "E1.31 settings:" << std::endl;
     ost << "\tUniverse: " << settings.e131.universe << std::endl;

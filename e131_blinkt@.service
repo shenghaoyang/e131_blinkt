@@ -39,7 +39,7 @@ SystemCallFilter=~@swap
 SystemCallFilter=~@sync
 
 Type=notify
-ExecStart=/usr/bin/e131_blinkt --gpiodev=/dev/%i
+ExecStart=/usr/bin/e131_blinkt --spidev=/dev/%i
 
 [Install]
 WantedBy=multi-user.target

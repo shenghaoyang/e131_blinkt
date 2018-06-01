@@ -42,9 +42,7 @@ struct config_settings {
      * Blinkt-device specific configuration.
      */
     struct {
-        std::string path;   ///< Path to GPIO character device for Blinkt.
-        int clock;          ///< GPIO character device line for clock signal.
-        int data;           ///< GPIO character device line for data signal.
+        std::string path;   ///< Path to SPI device for Blinkt.
     } blinkt;
 
     /**
