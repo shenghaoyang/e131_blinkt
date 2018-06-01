@@ -57,7 +57,6 @@ headers_cxx = (
     'queue',
     'string',
     'cstdint',
-    'memory',
     'limits',
     'functional',
     'type_traits',
