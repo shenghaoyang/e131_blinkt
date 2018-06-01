@@ -98,7 +98,7 @@ private:
     int fd;
     std::size_t num_leds;
     framebuffer_type framebuffer;
-    std::uint8_t* const pixel_data_start;
+    std::uint8_t* pixel_data_start;
     spi_ioc_transfer xfer { };
 public:
     /**
