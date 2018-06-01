@@ -9,6 +9,10 @@
 
 ``e131_blinkt`` receives ``E1.31`` DMX channel data from the network and relays that to a ``Blinkt!``
 
+Since the ``Blinkt!`` is not connected to any hardware SPI lines, a bit-banged SPI bus provided by the
+kernel using ``spi-gpio`` is necessary. As far as I know, this module is enabled on the 32-bit build of
+Arch Linux ARM for both the Raspberry Pi 2 and Raspberry Pi 3.
+
 Supports all standard ``E1.31`` features, including:
 
 - Source packet sequence validation
