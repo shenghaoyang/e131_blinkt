@@ -9,9 +9,9 @@
 
 ``e131_blinkt`` receives ``E1.31`` DMX channel data from the network and relays that to a ``Blinkt!``
 
-Since the ``Blinkt!`` is not connected to any hardware SPI lines, a bit-banged SPI bus provided by the
-kernel using ``spi-gpio`` is necessary. As far as I know, this module is enabled on the 32-bit build of
-Arch Linux ARM for both the Raspberry Pi 2 and Raspberry Pi 3.
+Since the ``Blinkt!`` is not connected to any hardware SPI lines, a bit-banged SPI bus provided by the kernel using ``spi-gpio`` is necessary. As far as I know, this module is enabled on the 32-bit & 64-bit builds of Arch Linux ARM for both the Raspberry Pi (+Zero), Raspberry Pi 2 and Raspberry Pi 3.
+
+A device tree overlay is required to inform the kernel about our desire to instantiate such a bit-banged SPI line. A reference device tree overlay source file is provided in ``blinkt_overlay.dts``. Use ``dtc`` to compile the overlay into a device tree blob.
 
 Supports all standard ``E1.31`` features, including:
 
@@ -71,15 +71,11 @@ scons -c install
 
 # Daemon configuration
 
-- The configuration file is installed in 
-  ``/etc/e131_blinkt/e131_blinkt.conf``. See inline
-  comments on how to configure the program. ``e131_blinkt`` uses
-  ``libconfig`` for configuration parsing.
+- The configuration file is installed in ``/etc/e131_blinkt/e131_blinkt.conf``. See inline comments on how to configure the program. ``e131_blinkt`` uses ``libconfig`` for configuration parsing.
 
-- There is a ``systemd`` service file included. Enable and start
-  ``e131_blinkt`` through:
-  ``# systemctl enable --now e131_blinkt@spidev0.0.service``.
-  Replace ``spidev0.0`` with your desired userspace SPI device.
+- There is a ``systemd`` service file included. Enable and start ``e131_blinkt`` through: 
+``# systemctl enable --now e131_blinkt@spidev0.0.service``. 
+Replace ``spidev0.0`` with your desired userspace SPI device.
   
 # License
 

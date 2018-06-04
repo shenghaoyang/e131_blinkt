@@ -1,0 +1,81 @@
+/* 
+ * Device tree overlay for Raspberry Pi devices to support the Pimoroni Blinkt!
+ * 
+ * This file is not produced by Pimoroni.
+ * 
+ * Requires a kernel with spi-gpio enabled.
+ *
+ * Tested on both a Raspberry Pi 3 and a Raspberry Pi Zero W.
+ *
+ * Provides a new user-space accessible /dev/spidev3.0 which can be used to
+ * communicate with the APA102 LEDs without bit-banging in userspace.
+ * 
+ * The primary motivation of this is to support sandboxing efforts by systemd.
+ * Userspace bitbanging using the character device isn't bad at all, and
+ * can push around 100kbit/s under python. The problem comes with seccomp BPF
+ * filters put around processes. Since there are a huge number of syscalls
+ * associated with userspace bitbanging, the overhead of seccomp pushes CPU
+ * usage up to terrifying levels. By utilizing the spi-gpio functionality
+ * of the kernel, a significantly lower number of system calls are needed
+ * to interface with the Blinkt!, and a significantly lower CPU usage is
+ * the result of that, even running with seccomp enabled.
+ *
+ * Copyright (C) 2018 Shenghao Yang <me@shenghaoyang.info>
+ * 
+ * See LICENSE for details.
+ */
+
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "brcm,bcm2708";    // Specify overlay compatability
+    
+    fragment {
+        /* 
+         * Target the GPIO node because bit-banged GPIO requires the 
+         * main GPIO node to be up in the first place.
+         */
+        target-path = "/";
+        __overlay__ {
+            /* 
+             * Assign this SPI bus an address of 3 to avoid conflicting with
+             * any hardware SPI buses.
+             */
+            spi3 {
+                compatible = "spi-gpio";
+                /* 
+                 * We only require one cell to define a chip select address
+                 * on the bit-banged SPI bus, because who is going to put 
+                 * > 2^32 devices on a bit-banged bus anyway?!
+                 */
+                #address-cells = <0x1>;
+                #size-cells = <0x0>;
+                ranges = <>;
+                status = "okay";
+                
+                gpio-sck = <&gpio 24 0>;
+                gpio-miso = <0>;
+                gpio-mosi = <&gpio 23 0>;
+                /*
+                 * spidev seems to not care that it has been assigned a chip
+                 * select index, but there is no actual chip select GPIO line
+                 * assigned. Maybe spi-gpio provides a dummy interface.
+                 */
+                cs-gpios = <>;
+                num-chipselects = <0>;
+                
+                spidev@0 {
+                    compatible = "spidev";
+                    reg = <0>;
+                    status = "okay";
+                    
+                    spi-max-frequency = <10000000>;
+                    spi-tx-bus-width = <1>;
+                    spi-rx-bus-width = <1>;
+                };
+            };
+        };
+    };
+};
+    
