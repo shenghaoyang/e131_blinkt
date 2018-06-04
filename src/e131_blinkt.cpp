@@ -50,6 +50,7 @@ static int universe_handler(sd_event_source* s, int fd, uint32_t revents,
             throw std::runtime_error { "Error event on E1.31 socket" };
         }
         const auto& events { uni.update() };
+        bool update_status { false };
         for (const auto& event : events) {
             switch (event.event) {
                 case event_type::CHANNEL_DATA_UPDATED: {
@@ -74,17 +75,19 @@ static int universe_handler(sd_event_source* s, int fd, uint32_t revents,
                     std::cerr << "DMX data updated" << std::endl;
 #endif
                 }
-                    return 0;
+                    break;
                 case event_type::SOURCE_ADDED:
                     sd_journal_print(LOG_INFO, "Source %s added to universe.",
                         e131_receiver::cid_str(event.id).c_str());
                     limit_reached = false;
+                    update_status = true;
                     break;
                 case event_type::SOURCE_REMOVED:
                     sd_journal_print(LOG_INFO,
                         "Source %s removed from universe.",
                         e131_receiver::cid_str(event.id).c_str());
                     limit_reached = false;
+                    update_status = true;
                     break;
                 case event_type::SOURCE_LIMIT_REACHED:
                     if (!limit_reached) {
@@ -95,11 +98,13 @@ static int universe_handler(sd_event_source* s, int fd, uint32_t revents,
                     }
                     break;
             }
+        }
+        if (update_status) {
             std::stringstream ss { };
             ss << uni.prio_tracker().sources() << " output sources "
                << "(priority: " << uni.prio_tracker() << ", total: "
-               << uni.prio_tracker().total_sources() << ")";
-            sd_notify(0, ss.str().c_str());
+               << uni.prio_tracker().total_sources() << ")" << "\n";
+            sd_notify(0, ss.str().c_str());   
         }
     } catch (const std::exception& e) {
         sd_journal_print(LOG_CRIT, "Exception processing data from E1.31 "
