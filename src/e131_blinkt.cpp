@@ -102,8 +102,9 @@ static int universe_handler(sd_event_source* s, int fd, uint32_t revents,
         if (update_status) {
             std::stringstream ss { };
             ss << "STATUS=" << uni.prio_tracker().sources() << "output sources "
-               << "(priority: " << uni.prio_tracker() << ", total: "
-               << uni.prio_tracker().total_sources() << ")" << "\n";
+               << "(priority: " << static_cast<int>(uni.prio_tracker()) 
+               << ", total: " << uni.prio_tracker().total_sources() << ")" 
+               << "\n";
             sd_notify(0, ss.str().c_str());   
         }
     } catch (const std::exception& e) {
