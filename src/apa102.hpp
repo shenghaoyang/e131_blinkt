@@ -51,18 +51,54 @@ constexpr unsigned int end_bytes_required(unsigned int leds) {
  * APA102 LEDs to change their output.
  */
 struct output {
-    ::std::uint8_t hdr : 3;         ///< Header for LED output sequence
+    /**
+     * Header for LED output sequence.
+     *
+     * \note *MUST* not be modified by the user.
+     */
+    /*
+     * Additional note - I'd like for this header to be a private field,
+     * but that does not guarantee a standard structure layout, i.e.
+     * the header may not be the first field in the structure.
+     * Having all members public ensures that the structure will be packed
+     * in the obvious order. If that's the case the we can simply memcpy() to
+     * our heart's content.
+     */
+    ::std::uint8_t hdr : 3;
     ::std::uint8_t brt : 5;         ///< LED brightness
     ::std::uint8_t blue;            ///< LED blue channel
     ::std::uint8_t green;           ///< LED green channel
     ::std::uint8_t red;             ///< LED red channel
 } __attribute__((packed));
 
+/*
+ * In the same vein, the operator overloads are declared externally to the
+ * structure itself. This guarantees that the structure will have a standard
+ * layout, and we can be sure of the order of the fields when we copy
+ * the data into memory.
+ */
+
+/**
+ * Check if two \ref output structures are the same.
+ *
+ * \param lhs first output structure.
+ * \param rhs second output structure.
+ * \retval true the output structures are the same.
+ * \retval false the output structures are not the same.
+ */
 constexpr bool operator==(const output& lhs, const output& rhs) {
     return (lhs.brt == rhs.brt) && (lhs.blue == rhs.blue)
         && (lhs.green == rhs.green) && (lhs.red == rhs.red);
 }
 
+/**
+ * Check if two \ref output structures are different.
+ *
+ * \param lhs first output structure.
+ * \param rhs second output structure.
+ * \retval true output structures are different.
+ * \retval false output structures are the same.
+ */
 constexpr bool operator!=(const output& lhs, const output& rhs) {
     return !(lhs == rhs);
 }
