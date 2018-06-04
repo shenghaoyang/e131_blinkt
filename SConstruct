@@ -52,7 +52,6 @@ headers_cxx = (
     'map',
     'stdexcept',
     'array',
-    'iostream',
     'iterator',
     'queue',
     'string',
