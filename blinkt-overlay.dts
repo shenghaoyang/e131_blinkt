@@ -31,7 +31,7 @@
 / {
     compatible = "brcm,bcm2708";    // Specify overlay compatability
     
-    fragment {
+    fragment@0 {
         /* 
          * Target the GPIO node because bit-banged GPIO requires the 
          * main GPIO node to be up in the first place.
