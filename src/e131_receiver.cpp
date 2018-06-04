@@ -73,6 +73,12 @@ priority::count_type priority::sources() const {
         : prio_cnt.rbegin()->second;
 }
 
+priority::count_type priority::total_sources() const {
+    return (std::accumulate(prio_cnt.cbegin(), prio_cnt.cend(), count_type { },
+        [](const count_type& count, const auto& pair) {
+        return (count + pair.second); }) - 1);
+}
+
 channel_data_updated_event::channel_data_updated_event(const cid& uuid)
     : update_event { update_event::event_type::CHANNEL_DATA_UPDATED, uuid } {
 }
@@ -274,12 +280,8 @@ const std::vector<update_event>& universe::update() {
     return queued_events;
 }
 
-priority::priority_type universe::max_priority() const {
+const priority& universe::prio_tracker() const {
     return prio;
-}
-
-priority::count_type universe::max_priority_sources() const {
-    return prio.sources();
 }
 
 const universe::channel_data_type& universe::dmx_data() const {

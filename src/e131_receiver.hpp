@@ -22,8 +22,9 @@
 #include <stdexcept>
 #include <iostream>
 #include <iterator>
-#include <string>
+#include <numeric>
 #include <cstdint>
+#include <string>
 #include <memory>
 #include <queue>
 #include <array>
@@ -159,6 +160,13 @@ public:
      * \return source count.
      */
     count_type sources() const;
+
+    /**
+     * Obtain the total number of sources tracked.
+     *
+     * \return total source count.
+     */
+    count_type total_sources() const;
 };
 
 /**
@@ -358,18 +366,11 @@ public:
     const std::vector<update_event>& update();
 
     /**
-     * Obtain the maximum source priority among all sources registered.
+     * Access the priority tracker used by this universe object.
      *
-     * \return maximum source priority.
+     * \return priority tracker object used.
      */
-    priority::priority_type max_priority() const;
-
-    /**
-     * Obtain the number of sources sending data at the maximum priority.
-     *
-     * \return number of sources sending data at the maximum priority.
-     */
-    priority::count_type max_priority_sources() const;
+    const priority& prio_tracker() const;
 
     /**
      * Obtain the DMX channel data, updated from the most recent

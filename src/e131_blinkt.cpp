@@ -34,6 +34,7 @@ static int universe_handler(sd_event_source* s, int fd, uint32_t revents,
     using event_type = e131_receiver::update_event::event_type;
     auto& info { *reinterpret_cast<handler_info* const>(userdata) };
     uni_type& uni { info.uni };
+    static bool limit_reached { false };
 #ifndef DEBUG
     auto& blinkt { info.blinkt };
 #endif
@@ -73,26 +74,32 @@ static int universe_handler(sd_event_source* s, int fd, uint32_t revents,
                     std::cerr << "DMX data updated" << std::endl;
 #endif
                 }
-                    break;
+                    return 0;
                 case event_type::SOURCE_ADDED:
-                    sd_journal_print(LOG_INFO, "Source %s added to universe. "
-                        "(Current max priority: %d [%d sources])",
-                        e131_receiver::cid_str(event.id).c_str(),
-                        uni.max_priority(), uni.max_priority_sources());
+                    sd_journal_print(LOG_INFO, "Source %s added to universe.",
+                        e131_receiver::cid_str(event.id).c_str());
+                    limit_reached = false;
                     break;
                 case event_type::SOURCE_REMOVED:
-                    sd_journal_print(LOG_INFO, "Source %s "
-                        "removed from universe (transmission terminated)."
-                        " (Current max priority: %d [%d sources])",
-                        e131_receiver::cid_str(event.id).c_str(),
-                        uni.max_priority(), uni.max_priority_sources());
+                    sd_journal_print(LOG_INFO,
+                        "Source %s removed from universe.",
+                        e131_receiver::cid_str(event.id).c_str());
+                    limit_reached = false;
                     break;
                 case event_type::SOURCE_LIMIT_REACHED:
-                    sd_journal_print(LOG_INFO, "Source %s "
-                        "not added to universe: source limit reached",
-                        e131_receiver::cid_str(event.id).c_str());
+                    if (!limit_reached) {
+                        sd_journal_print(LOG_INFO, "Source %s "
+                            "not added to universe: source limit reached",
+                            e131_receiver::cid_str(event.id).c_str());
+                        limit_reached = true;
+                    }
                     break;
             }
+            std::stringstream ss { };
+            ss << uni.prio_tracker().sources() << " output sources "
+               << "(priority: " << uni.prio_tracker() << ", total: "
+               << uni.prio_tracker().total_sources() << ")";
+            sd_notify(0, ss.str().c_str());
         }
     } catch (const std::exception& e) {
         sd_journal_print(LOG_CRIT, "Exception processing data from E1.31 "

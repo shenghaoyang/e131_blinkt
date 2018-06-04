@@ -60,7 +60,9 @@ headers_cxx = (
     'functional',
     'type_traits',
     'cstring',
-    'vector'
+    'vector',
+    'numeric',
+    'sstream'
 )
 
 
