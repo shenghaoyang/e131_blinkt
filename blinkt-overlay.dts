@@ -7,8 +7,9 @@
  *
  * Tested on both a Raspberry Pi 3 and a Raspberry Pi Zero W.
  *
- * Provides a new user-space accessible /dev/spidev3.0 which can be used to
- * communicate with the APA102 LEDs without bit-banging in userspace.
+ * Provides a new user-space accessible /dev/spidev3.0 (in most cases!) 
+ * which can be used to communicate with the APA102 LEDs without bit-banging 
+ * in userspace.
  * 
  * The primary motivation of this is to support sandboxing efforts by systemd.
  * Userspace bitbanging using the character device isn't bad at all, and
@@ -32,22 +33,26 @@
     compatible = "brcm,bcm2708";    // Specify overlay compatability
     
     fragment@0 {
-        /* 
-         * Target the GPIO node because bit-banged GPIO requires the 
-         * main GPIO node to be up in the first place.
-         */
         target-path = "/";
         __overlay__ {
             /* 
-             * Assign this SPI bus an address of 3 to avoid conflicting with
-             * any hardware SPI buses.
+             * Assign this SPI bus the name "blinkt" - udev rules can be
+             * used to match on this name and symlink "/dev/spidevX.0" to
+             * a more appropriate name that isn't dependent on overlay
+             * application order.
              */
-            spi3 {
+            blinkt {
                 compatible = "spi-gpio";
                 /* 
                  * We only require one cell to define a chip select address
                  * on the bit-banged SPI bus, because who is going to put 
                  * > 2^32 devices on a bit-banged bus anyway?!
+                 *
+                 * TODO: Investigate Quad-SPI / Bi-SPI functionality, to
+                 * synchronize multiple lighting strips even with the SPI
+                 * bus driven by software -> each additional strip will
+                 * only require one additional GPIO pin, since they can
+                 * share the CLK signal from the reserved clock pin.
                  */
                 #address-cells = <0x1>;
                 #size-cells = <0x0>;
@@ -55,12 +60,16 @@
                 status = "okay";
                 
                 gpio-sck = <&gpio 24 0>;
-                gpio-miso = <0>;
+                /* 
+                 * Not defining any ceels for the miso property forces the
+                 * spi-gpio bitbanging driver to enter tx-only mode, saving
+                 * us one GPIO pin.
+                 */
+                gpio-miso = <>;
                 gpio-mosi = <&gpio 23 0>;
                 /*
-                 * spidev seems to not care that it has been assigned a chip
-                 * select index, but there is no actual chip select GPIO line
-                 * assigned. Maybe spi-gpio provides a dummy interface.
+                 * Don't assign any chip select lines. This saves us another
+                 * GPIO pin.
                  */
                 cs-gpios = <>;
                 num-chipselects = <0>;
